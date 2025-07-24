@@ -3239,41 +3239,44 @@ async def main():
         if CRYPTOPAY_API_TOKEN:
             await configurar_webhook_cryptopay()
 
-        # Iniciar o bot com polling (método correto para v20+)
+        # Iniciar o bot com polling (método CORRETO para v20+)
         async with application:
+            # Inicializar aplicação
+            await application.initialize()
             await application.start()
             
-            # Iniciar polling
+            # Iniciar polling com configurações corretas para v20+
             await application.updater.start_polling(
+                poll_interval=1.0,
+                timeout=10,
+                bootstrap_retries=-1,
+                read_timeout=10,
+                write_timeout=10,
+                connect_timeout=10,
+                pool_timeout=1,
                 allowed_updates=["message", "callback_query"],
                 drop_pending_updates=True
             )
             
             logger.info("✅ Bot iniciado com polling ativo!")
             
-            # Aguardar indefinidamente até sinal de parada
+            # Aguardar indefinidamente
             try:
-                import signal
-                
-                # Função para lidar com sinais de interrupção
-                def signal_handler(signum, frame):
-                    logger.info(f"🛑 Sinal {signum} recebido, parando serviços...")
-                    raise KeyboardInterrupt()
-                
-                # Registrar handlers para sinais
-                signal.signal(signal.SIGINT, signal_handler)
-                signal.signal(signal.SIGTERM, signal_handler)
-                
-                # Aguardar indefinidamente
+                # Aguardar até receber sinal de parada
                 while True:
                     await asyncio.sleep(1)
                     
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, SystemExit):
                 logger.info("🛑 Parando serviços...")
             finally:
                 logger.info("🔄 Finalizando aplicação...")
-                await application.updater.stop()
-                await web_runner.cleanup()
+                try:
+                    await application.updater.stop()
+                    await application.stop()
+                    await application.shutdown()
+                    await web_runner.cleanup()
+                except Exception as e:
+                    logger.error(f"Erro ao finalizar: {e}")
                 logger.info("✅ Serviços finalizados com sucesso!")
 
     except Exception as e:
