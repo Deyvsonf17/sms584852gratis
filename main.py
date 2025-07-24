@@ -11,8 +11,29 @@ import urllib.parse
 import threading
 import time
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+# Importação específica para contornar conflito de namespace
+import sys
+import importlib.util
+
+# Força importação do python-telegram-bot
+try:
+    # Primeiro tenta import padrão
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+except ImportError:
+    # Se falhar, força import do módulo correto
+    import telegram
+    if not hasattr(telegram, 'Update'):
+        # Remove módulo telegram conflitante do cache
+        if 'telegram' in sys.modules:
+            del sys.modules['telegram']
+        
+        # Import direto do python-telegram-bot
+        import python_telegram_bot as telegram
+        sys.modules['telegram'] = telegram
+        
+        from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Bot
+        from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from collections import defaultdict
 from functools import wraps
 
@@ -3047,8 +3068,8 @@ async def processar_pagamento_webhook(invoice_id, amount, currency):
             # Notificar admin sobre pagamento com valor incorreto
             if ADMIN_ID:
                 try:
-                    import telegram
-                    bot = telegram.Bot(token=BOT_TOKEN)
+                    # Para v20+, usar Bot importado
+                    bot = Bot(token=BOT_TOKEN)
                     async with bot:
                         await bot.send_message(
                             chat_id=ADMIN_ID,
@@ -3101,8 +3122,8 @@ async def processar_pagamento_webhook(invoice_id, amount, currency):
 
                 # Notificar indicador
                 try:
-                    import telegram
-                    bot = telegram.Bot(token=BOT_TOKEN)
+                    # Para v20+, usar Bot importado
+                    bot = Bot(token=BOT_TOKEN)
                     async with bot:
                         await bot.send_message(
                             indicador_id,
@@ -3131,8 +3152,8 @@ async def processar_pagamento_webhook(invoice_id, amount, currency):
 
         # Enviar notificação para o usuário
         try:
-            import telegram
-            bot = telegram.Bot(token=BOT_TOKEN)
+            # Para v20+, usar Bot importado
+            bot = Bot(token=BOT_TOKEN)
 
             mensagem_usuario = (
                 f"✅ PAGAMENTO CONFIRMADO AUTOMATICAMENTE!\n\n"
@@ -3239,45 +3260,33 @@ async def main():
         if CRYPTOPAY_API_TOKEN:
             await configurar_webhook_cryptopay()
 
-        # Iniciar o bot com polling (método CORRETO para v20+)
-        async with application:
-            # Inicializar aplicação
-            await application.initialize()
-            await application.start()
-            
-            # Iniciar polling com configurações corretas para v20+
-            await application.updater.start_polling(
-                poll_interval=1.0,
-                timeout=10,
-                bootstrap_retries=-1,
-                read_timeout=10,
-                write_timeout=10,
-                connect_timeout=10,
-                pool_timeout=1,
-                allowed_updates=["message", "callback_query"],
-                drop_pending_updates=True
-            )
-            
-            logger.info("✅ Bot iniciado com polling ativo!")
-            
-            # Aguardar indefinidamente
-            try:
-                # Aguardar até receber sinal de parada
-                while True:
-                    await asyncio.sleep(1)
-                    
-            except (KeyboardInterrupt, SystemExit):
-                logger.info("🛑 Parando serviços...")
-            finally:
-                logger.info("🔄 Finalizando aplicação...")
-                try:
-                    await application.updater.stop()
-                    await application.stop()
-                    await application.shutdown()
-                    await web_runner.cleanup()
-                except Exception as e:
-                    logger.error(f"Erro ao finalizar: {e}")
-                logger.info("✅ Serviços finalizados com sucesso!")
+        # Iniciar o bot com polling (método correto para v20+)
+        logger.info("✅ Bot iniciado com polling ativo!")
+        
+        # Usar async polling que é compatível com event loops existentes
+        await application.initialize()
+        await application.start()
+        
+        # Iniciar polling assíncrono
+        await application.updater.start_polling(
+            allowed_updates=["message", "callback_query"],
+            drop_pending_updates=True
+        )
+        
+        # Manter o bot rodando usando o método correto da v20+
+        import signal
+        stop_signals = (signal.SIGTERM, signal.SIGINT)
+        for sig in stop_signals:
+            asyncio.get_running_loop().add_signal_handler(sig, lambda: application.stop())
+        
+        # Aguardar indefinidamente até parar
+        try:
+            while application.running:
+                await asyncio.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Bot interrompido pelo usuário")
+        finally:
+            await application.stop()
 
     except Exception as e:
         logger.error(f"Erro crítico ao iniciar bot: {e}")
